@@ -118,3 +118,112 @@ contract 今日の言葉コンテスト {
         payable(msg.sender).transfer(address(this).balance);
     }
 }
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+/// @title Baseチェーン専用 今日の言葉アリーナコントラクト
+/// @notice このコントラクトはBaseチェーン上で完全に新規に設計されたオリジナルコントラクトです
+contract DailyWordArena {
+
+    // 言葉の構造体定義
+    struct WordEntry {
+        string content;           // ユーザーが投稿した今日の言葉
+        address author;           // 投稿者のアドレス
+        uint256 popularity;       // ETHで増やされた人気度
+        uint256 timestamp;        // 投稿または最後に更新された時間
+    }
+
+    // 全ての言葉を保存する配列
+    WordEntry[] public allEntries;
+
+    // 各アドレスが最後に投稿した言葉のインデックスを記録
+    mapping(address => uint256) public lastEntryIndex;
+
+    // イベント定義
+    event WordPosted(uint256 indexed index, address author, string content, uint256 initialPopularity);
+    event PopularityIncreased(uint256 indexed index, uint256 addedAmount, uint256 newPopularity);
+
+    // コンストラクタ（何も初期化しない）
+    constructor() {
+        // デプロイ時に特別な初期化は行いません
+    }
+
+    /// @notice 今日の言葉を投稿または更新する関数。最低0.0001 ETHが必要です
+    /// @param _content 投稿する言葉の内容（最大280文字）
+    function postWord(string calldata _content) external payable {
+        require(bytes(_content).length > 0 && bytes(_content).length <= 280, unicode"言葉の長さは1〜280文字の間でなければなりません");
+        require(msg.value >= 0.0001 ether, unicode"初期人気度として最低0.0001 ETHが必要です");
+
+        uint256 currentIndex;
+
+        if (lastEntryIndex[msg.sender] == 0) {
+            // 新規投稿
+            currentIndex = allEntries.length;
+            allEntries.push(WordEntry({
+                content: _content,
+                author: msg.sender,
+                popularity: msg.value,
+                timestamp: block.timestamp
+            }));
+        } else {
+            // 既存の言葉を更新
+            currentIndex = lastEntryIndex[msg.sender] - 1;
+            allEntries[currentIndex].content = _content;
+            allEntries[currentIndex].popularity += msg.value;
+            allEntries[currentIndex].timestamp = block.timestamp;
+        }
+
+        lastEntryIndex[msg.sender] = currentIndex + 1;
+
+        emit WordPosted(currentIndex, msg.sender, _content, msg.value);
+    }
+
+    /// @notice 特定の言葉に人気度（ETH）を追加する関数
+    /// @param _index 人気度を上げたい言葉のインデックス
+    function increasePopularity(uint256 _index) external payable {
+        require(_index < allEntries.length, unicode"指定された言葉は存在しません");
+        require(msg.value > 0, unicode"人気度を上げるにはETHを送信する必要があります");
+
+        allEntries[_index].popularity += msg.value;
+        allEntries[_index].timestamp = block.timestamp;
+
+        emit PopularityIncreased(_index, msg.value, allEntries[_index].popularity);
+    }
+
+    /// @notice 現在最も人気のある言葉を取得する
+    /// @return 最も人気度の高い言葉の情報
+    function getMostPopularWord() external view returns (WordEntry memory) {
+        require(allEntries.length > 0, unicode"まだ言葉が投稿されていません");
+
+        uint256 highestIndex = 0;
+        uint256 highestPopularity = allEntries[0].popularity;
+
+        for (uint256 i = 1; i < allEntries.length; i++) {
+            if (allEntries[i].popularity > highestPopularity) {
+                highestPopularity = allEntries[i].popularity;
+                highestIndex = i;
+            }
+        }
+
+        return allEntries[highestIndex];
+    }
+
+    /// @notice 指定したアドレスが最後に投稿した言葉を取得する
+    /// @param _author 確認したいユーザーのアドレス
+    function getLastWordOf(address _author) external view returns (WordEntry memory) {
+        uint256 index = lastEntryIndex[_author];
+        require(index > 0, unicode"このユーザーはまだ言葉を投稿していません");
+        return allEntries[index - 1];
+    }
+
+    /// @notice 現在投稿されている言葉の総数を取得する
+    function getTotalWords() external view returns (uint256) {
+        return allEntries.length;
+    }
+
+    /// @notice コントラクトに蓄積されたETHを引き出す（簡易版）
+    function withdrawFunds() external {
+        require(msg.sender == tx.origin, unicode"直接呼び出したアドレスからのみ引き出せます");
+        payable(msg.sender).transfer(address(this).balance);
+    }
+}
